@@ -1,6 +1,8 @@
 #!/bin/sh
-# Round-54 rig: survey the 2201 sync instruction impl + SIMT coop groups
-# header, then build/run C0 control, F1 notify-wait, F3 wait-only x3.
+# Round-55 rig. r54 hung: sync_impl.h was not under asc/include, find came
+# back empty, and `sed ... $Y` with no file read terminal stdin forever.
+# Rule now enforced: every command gets a real file argument or is guarded;
+# nothing in this script can read stdin.
 T=/usr/local/Ascend/ascend-toolkit/latest
 B=$T/aarch64-linux/bin/bisheng
 L=$T/aarch64-linux/lib64
@@ -11,18 +13,17 @@ mkdir -p /tmp/tc
 S=ascend_probe/two_core.asc
 INC="-I$T/include -L$L -lascendcl"
 H=$T/aarch64-linux/asc/include
-Y=$H/c_api/sync/instr_impl/npu_arch_2201/sync_impl.h
-if [ ! -f "$Y" ]; then
-  Y=`find $H -name sync_impl.h -path "*2201*" | head -1`
+echo ==IMPL_FIND==
+Y=`find $T/ -name sync_impl.h 2>/dev/null | head -3`
+echo "Y=$Y"
+if [ -n "$Y" ]; then
+  echo ==IMPL_FN==
+  grep -n -A14 "asc_sync_block_arrive_impl\|asc_sync_block_wait_impl\|asc_sync_notify_impl\|asc_sync_wait_impl" $Y | head -90
+  echo ==FLAG_IDS==
+  grep -n "ffts\|FFTS\|flag" $Y | head -20
+else
+  echo NO_SYNC_IMPL_ON_DISK
 fi
-echo ==IMPL_PATH==
-ls -l $Y
-echo ==IMPL_HEAD==
-sed -n '1,60p' $Y
-echo ==IMPL_FN==
-grep -n -A14 "asc_sync_block_arrive_impl\|asc_sync_block_wait_impl\|asc_sync_notify_impl\|asc_sync_wait_impl" $Y | head -90
-echo ==FLAG_IDS==
-grep -rn "flag_id\|flagID\|FFTS\|ffts" $Y | head -20
 echo ==SIMT_CG==
 head -50 $H/simt_api/cooperative_groups.h
 echo ==CG_SYNC==
