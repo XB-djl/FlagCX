@@ -1,6 +1,6 @@
 #!/bin/sh
-# Round-53 rig: survey sync/cooperative APIs, build V0/V1/V2/V3 + coop
-# variants, print every BUILD_RC, run each x3 under timeout.
+# Round-54 rig: survey the 2201 sync instruction impl + SIMT coop groups
+# header, then build/run C0 control, F1 notify-wait, F3 wait-only x3.
 T=/usr/local/Ascend/ascend-toolkit/latest
 B=$T/aarch64-linux/bin/bisheng
 L=$T/aarch64-linux/lib64
@@ -11,28 +11,34 @@ mkdir -p /tmp/tc
 S=ascend_probe/two_core.asc
 INC="-I$T/include -L$L -lascendcl"
 H=$T/aarch64-linux/asc/include
-echo ==SYNC_LIST==
-grep -n "asc_sync" $H/c_api/sync/sync.h | head -30
-echo ==SYNC_TOP==
-sed -n '1,40p' $H/c_api/sync/sync.h
-echo ==COOP_ACL==
-grep -rn "CooperativeKernel" $T/include/acl | head -6
-echo ==COOP_ASC==
-grep -rni cooperative $H --include=*.h | head -8
-for v in V0 V1 V2 V3; do
+Y=$H/c_api/sync/instr_impl/npu_arch_2201/sync_impl.h
+if [ ! -f "$Y" ]; then
+  Y=`find $H -name sync_impl.h -path "*2201*" | head -1`
+fi
+echo ==IMPL_PATH==
+ls -l $Y
+echo ==IMPL_HEAD==
+sed -n '1,60p' $Y
+echo ==IMPL_FN==
+grep -n -A14 "asc_sync_block_arrive_impl\|asc_sync_block_wait_impl\|asc_sync_notify_impl\|asc_sync_wait_impl" $Y | head -90
+echo ==FLAG_IDS==
+grep -rn "flag_id\|flagID\|FFTS\|ffts" $Y | head -20
+echo ==SIMT_CG==
+head -50 $H/simt_api/cooperative_groups.h
+echo ==CG_SYNC==
+grep -n "sync\|tile\|this_" $H/simt_api/cooperative_groups.h | head -16
+for v in C0 F1 F3; do
   w=`echo $v | tr A-Z a-z`
-  $B $G -D$v $S -o /tmp/tc/r_$w $INC > /tmp/tc/e_$w.txt 2>&1
+  D="-D$v"
+  if [ $v = C0 ]; then D=""; fi
+  $B $G $D $S -o /tmp/tc/r_$w $INC > /tmp/tc/e_$w.txt 2>&1
   echo ${v}_BUILD_RC=$?
 done
-$B $G -DV1 -DCOOP $S -o /tmp/tc/r_v1c $INC > /tmp/tc/e_v1c.txt 2>&1
-echo V1C_BUILD_RC=$?
-$B $G -DV2 -DCOOP $S -o /tmp/tc/r_v2c $INC > /tmp/tc/e_v2c.txt 2>&1
-echo V2C_BUILD_RC=$?
-for v in v0 v1 v2 v3 v1c v2c; do echo "== e_$v"; head -8 /tmp/tc/e_$v.txt; done
+for v in c0 f1 f3; do echo "== e_$v"; head -8 /tmp/tc/e_$v.txt; done
 export LD_LIBRARY_PATH=$L:$LD_LIBRARY_PATH
-for v in v0 v1 v2 v3 v1c v2c; do
+for v in c0 f1 f3; do
   for i in 1 2 3; do
     echo "== run $v $i"
-    timeout 20 /tmp/tc/r_$v || echo ${v}_${i}_EXIT=$?
+    timeout 25 /tmp/tc/r_$v || echo ${v}_${i}_EXIT=$?
   done
 done
