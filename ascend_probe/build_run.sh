@@ -1,13 +1,12 @@
 #!/bin/sh
-# Round-57 rig. r56 proved $T/include/c_api does not exist (the empty
-# EVENT_T/NOTIFY/PIPEM greps) — headers come from bisheng's builtin search
-# path rooted at asc/include, same trap as r48. So this round greps the
-# TWO REAL TREES: asc/include (public) and asc/impl (instruction bodies),
-# and opens utils_impl/utils_impl.h where set_flag/wait_flag/
-# ffts_cross_core_sync live (r56 proved the five sync_impl files only
-# #define macros onto them). Variants: C0 baseline, P1 doorbell poll with
-# per-iteration line invalidate, P2 same without invalidate.
-# Nothing here can read stdin; every dump has a guard or a real file.
+# Round-58 rig. Variants: C0 baseline + H1 (doorbell poll hammered with
+# asc_dcci_entire_all every spin — the last polling form; r57 showed
+# per-line invalidate == no invalidate, both blind). Investigation: full
+# sync.h (only ~60 lines — need the WHOLE 2201 branch: who is the SET
+# counterpart of wait_flag_dev?), utils_type.h (home of event_t/pipe_t
+# enums), CrossCoreSetFlag/WaitFlag in the C++ adv_api layer, set_flag_dev
+# anywhere in either tree, and strings-bisheng evidence that
+# ffts_cross_core_sync is a builtin. Nothing may read stdin.
 T=/usr/local/Ascend/ascend-toolkit/latest
 B=$T/aarch64-linux/bin/bisheng
 L=$T/aarch64-linux/lib64
@@ -19,36 +18,30 @@ S=ascend_probe/two_core.asc
 INC="-I$T/include -L$L -lascendcl"
 H=$T/aarch64-linux/asc/include
 M=$T/aarch64-linux/asc/impl/c_api/instr_impl/npu_arch_2201
-echo ==TREE_CHECK==
-ls -d $H $M $M/utils_impl 2>/dev/null
-echo ==UTILS_LIST==
-ls $M/utils_impl 2>/dev/null
-echo ==UTILS_HEAD==
-cat -n $M/utils_impl/utils_impl.h 2>/dev/null | head -80
-echo ==FFTS_DEF==
-grep -rn "ffts_cross_core_sync" $M $H 2>/dev/null | head -8
-echo ==SETFLAG_DEF==
-grep -rn "set_flag" $M $H 2>/dev/null | head -14
-echo ==WAITDEV_DEF==
-grep -rn "wait_flag_dev" $M $H 2>/dev/null | head -8
-echo ==EVENT_T==
-grep -rn "event_t" $H 2>/dev/null | head -20
-echo ==NOTIFY_PUB==
-grep -rn -B2 -A4 "asc_sync_notify" $H/c_api 2>/dev/null | head -30
-echo ==PIPEM==
-grep -rn "PIPE_M" $H/c_api 2>/dev/null | head -6
-for v in C0 P1 P2; do
+echo ==SYNC_H_FULL==
+cat -n $H/c_api/sync/sync.h 2>/dev/null | head -70
+echo ==TYPE_ENUMS==
+grep -n "event_t\|pipe_t\|enum" $M/utils_impl/utils_type.h 2>/dev/null | head -30
+echo ==PB_IMPL_FULL==
+cat -n $M/sync_impl/asc_pipe_barrier_impl.h 2>/dev/null | head -60
+echo ==SET_FLAG_DEV==
+grep -rn "set_flag_dev" $M $H 2>/dev/null | head -10
+echo ==XC_CXX==
+grep -rn "CrossCoreSetFlag\|CrossCoreWaitFlag" $H 2>/dev/null | head -10
+echo ==XC_BODY==
+grep -rn -A6 "CrossCoreSetFlag" $H 2>/dev/null | head -40
+echo ==BUILTIN_STRINGS==
+strings -a $B 2>/dev/null | grep -i "ffts_cross_core_sync\|set_flag_dev\|wait_flag_dev" | head -8
+for v in C0 H1; do
   w=`echo $v | tr A-Z a-z`
   DF="-D$v"
   if [ $v = C0 ]; then DF=""; fi
   $B $G $DF $S -o /tmp/tc/r_$w $INC > /tmp/tc/e_$w.txt 2>&1
   echo ${v}_BUILD_RC=$?
 done
-for v in c0 p1 p2; do echo "== e_$v"; head -8 /tmp/tc/e_$v.txt; done
-echo ==SECTIONS==
-readelf -S /tmp/tc/r_c0 | grep -i "aicore\|aivector\|npu\|binary" | head -10
+for v in c0 h1; do echo "== e_$v"; head -8 /tmp/tc/e_$v.txt; done
 export LD_LIBRARY_PATH=$L:$LD_LIBRARY_PATH
-for v in c0 p1 p2; do
+for v in c0 h1; do
   for i in 1 2 3; do
     echo "== run $v $i"
     timeout 25 /tmp/tc/r_$v || echo ${v}_${i}_EXIT=$?
