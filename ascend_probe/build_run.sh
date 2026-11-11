@@ -1,16 +1,14 @@
 #!/bin/sh
-# Round-59 rig. Two questions, one round:
-#  (1) Is the polling blindness (r57/r58 SP=20000 x12) hardware or the
-#      compiler hoisting the load? H2/H3 poll through volatile __gm__
-#      (guaranteed real load per iteration); if bisheng rejects
-#      volatile GM, the build error settles it another way.
-#  (2) Who is the real cross-core SETTER? sync.h 2201 has no set-side
-#      for wait_flag_dev; AscendC's CrossCoreSetFlag (used by
-#      matmul_client.h) has its template in the IMPL tree — locate and
-#      dump it, plus uncut strings evidence for set_flag_dev-family
-#      builtins, plus utils_intf.h where event_t/pipe_t enums live
-#      (utils_type.h had neither — r58 TYPE_ENUMS came back empty).
-# Nothing may read stdin; every dump guarded.
+# Round-60 rig. Main event: R1 rendezvous x10 — forces the race on BOTH
+# cores (consumer publishes READY then polls doorbell; producer polls
+# READY before producing), every spin a real volatile load after a
+# whole-L1 invalidate. PASS gate for P3 prototype: 10/10 with
+# SYNC_RC=0, OUT 1 1 7 8, SP<20000, PS<20000 (and expect most PS>0 —
+# that means the producer genuinely hammered and saw a fresh READY).
+# Side investigations (ffts backlog, does not block the main line):
+# dump matmul_cross_core_sync.h (CrossCoreSetFlag's likely home),
+# refined strings (flag_dev family), locate the real event_t header.
+# Nothing may read stdin.
 T=/usr/local/Ascend/ascend-toolkit/latest
 B=$T/aarch64-linux/bin/bisheng
 L=$T/aarch64-linux/lib64
@@ -22,36 +20,31 @@ S=ascend_probe/two_core.asc
 INC="-I$T/include -L$L -lascendcl"
 H=$T/aarch64-linux/asc/include
 M=$T/aarch64-linux/asc/impl/c_api/instr_impl/npu_arch_2201
-echo ==XC_FILE==
-X=`grep -rln "CrossCoreSetFlag" $T/aarch64-linux/asc/impl 2>/dev/null | head -3`
-echo "X=$X"
-if [ -n "$X" ]; then
-  echo ==XC_DEF==
-  grep -n -B2 -A22 "void CrossCoreSetFlag" $X 2>/dev/null | head -48
+echo ==CC_SYNC_H==
+cat -n $T/aarch64-linux/asc/impl/adv_api/detail/matmul/param/matmul_cross_core_sync.h 2>/dev/null | head -70
+echo ==STRINGS_FLAGDEV==
+strings -a $B 2>/dev/null | grep -i "flag_dev" | head -12
+echo ==EVENT_T_HOME==
+V=`grep -rln "event_t" $M 2>/dev/null | head -3`
+echo "V=$V"
+if [ -n "$V" ]; then
+  echo ==EVENT_T_LINES==
+  grep -n "event_t" $V 2>/dev/null | head -12
 fi
-echo ==STRINGS_SET==
-strings -a $B 2>/dev/null | grep -i "set_flag_dev\|cross_core_set\|SET_INTRA" | head -14
-echo ==INTF_FILE==
-W=`find $T/ -name utils_intf.h 2>/dev/null | head -1`
-echo "W=$W"
-if [ -n "$W" ]; then
-  echo ==INTF_ENUMS==
-  grep -n "event_t\|pipe_t\|PIPE_\|EVT" "$W" 2>/dev/null | head -40
-fi
-echo ==EVENTT_TYPEDEF==
-grep -rn "event_t;\|} event_t" $M $H 2>/dev/null | head -6
-for v in C0 H2 H3; do
+for v in C0 R1; do
   w=`echo $v | tr A-Z a-z`
   DF="-D$v"
   if [ $v = C0 ]; then DF=""; fi
   $B $G $DF $S -o /tmp/tc/r_$w $INC > /tmp/tc/e_$w.txt 2>&1
   echo ${v}_BUILD_RC=$?
 done
-for v in c0 h2 h3; do echo "== e_$v"; head -12 /tmp/tc/e_$v.txt; done
+for v in c0 r1; do echo "== e_$v"; head -12 /tmp/tc/e_$v.txt; done
 export LD_LIBRARY_PATH=$L:$LD_LIBRARY_PATH
-for v in c0 h2 h3; do
-  for i in 1 2 3; do
-    echo "== run $v $i"
-    timeout 25 /tmp/tc/r_$v || echo ${v}_${i}_EXIT=$?
-  done
+for i in 1 2; do
+  echo "== run c0 $i"
+  timeout 25 /tmp/tc/r_c0 || echo c0_${i}_EXIT=$?
+done
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  echo "== run r1 $i"
+  timeout 25 /tmp/tc/r_r1 || echo r1_${i}_EXIT=$?
 done
