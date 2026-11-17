@@ -170,6 +170,16 @@ endif
 ifeq ($(KERNEL_PLATFORM), ascend)
   ASCEND_IR_TARGETS  := $(BINDIR)/test_device_ir_unified_intra
   ASCEND_API_TARGETS := $(BINDIR)/test_device_api_intra
+  # T2 wiring gate (FLAGCX_ASCEND_T2=1; default off keeps this platform
+  # byte-identical to the #705 intra-only contract).  The inter suite is
+  # NOT ready: device_api.asc provides nine intra/local launchers, while
+  # test_device_api_inter.cpp references seventeen (Inter/World barrier
+  # plus the thirteen Net-transport ones).  Enabling the target therefore
+  # produces a designed link-time failure whose undefined list is the T2
+  # work inventory - no case can silently pass without its launcher.
+  ifeq ($(FLAGCX_ASCEND_T2),1)
+    ASCEND_API_TARGETS += $(BINDIR)/test_device_api_inter
+  endif
   # The skip list is the original universe minus everything this platform
   # actually builds.  Ascend keeps ONE IR suite (unified_intra) AND the
   # legacy api_intra suite, so filter out both - not just the IR target -
