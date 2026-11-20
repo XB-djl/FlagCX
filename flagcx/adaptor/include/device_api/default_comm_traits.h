@@ -1490,6 +1490,28 @@ struct CommTraits<DefaultBackend<PlatformTag>> {
 };
 
 // ============================================================
+// BarrierSlotOps: ordered scalar access for IPC barrier slots.
+//
+// The intra Barrier below funnels every slot store/load through this
+// trait so a platform can substitute its own measured ordered channel.
+// The default delegates to the platform atomics and changes nothing for
+// the other backends.
+// ============================================================
+template <typename P> struct BarrierSlotOps {
+  using Atomic = typename PlatformTraits<P>::Atomic;
+
+  FLAGCX_DEVICE_INLINE_DECORATOR static void
+  store(uint64_t *p, uint64_t value, flagcxDeviceMemoryOrder_t order) {
+    Atomic::store(p, value, order);
+  }
+
+  FLAGCX_DEVICE_INLINE_DECORATOR static uint64_t
+  load(uint64_t *p, flagcxDeviceMemoryOrder_t order) {
+    return Atomic::load(p, order);
+  }
+};
+
+// ============================================================
 // Barrier specializations for DefaultBackend<P>
 //
 // Standalone partial specializations (C++ forbids explicit specialization
@@ -1527,7 +1549,7 @@ struct Barrier<DefaultBackend<P>, flagcxTeamTagIntra, Coop> {
       : _coop(coop), _peerBuffers(dc.barrierPeers), _nRanks(team.nRanks),
         _myRank(team.rank), _nBarriers(dc.nBarriers), _ctaIndex(index),
         _epochBuffer(dc.epochBuffer),
-        _epoch(Atomic::load(&dc.epochBuffer[index],
+        _epoch(BarrierSlotOps<P>::load(&dc.epochBuffer[index],
                             flagcxDeviceMemoryOrderAcquire)) {
     assert(index < FLAGCX_DEVICE_CTA_COUNT);
   }
@@ -1541,7 +1563,8 @@ struct Barrier<DefaultBackend<P>, flagcxTeamTagIntra, Coop> {
       if (peer >= _nRanks)
         peer -= _nRanks;
       uint64_t *slot = &_peerBuffers[peer][_myRank * _nBarriers + _ctaIndex];
-      Atomic::store(slot, _epoch + 1, flagcxDeviceMemoryOrderRelease);
+      BarrierSlotOps<P>::store(slot, _epoch + 1,
+                               flagcxDeviceMemoryOrderRelease);
     }
   }
 
@@ -1554,15 +1577,17 @@ struct Barrier<DefaultBackend<P>, flagcxTeamTagIntra, Coop> {
         peer -= _nRanks;
       uint64_t *slot = &_peerBuffers[_myRank][peer * _nBarriers + _ctaIndex];
       int iter = 0;
-      uint64_t current = Atomic::load(slot, flagcxDeviceMemoryOrderAcquire);
+      uint64_t current =
+          BarrierSlotOps<P>::load(slot, flagcxDeviceMemoryOrderAcquire);
       while (current < _epoch + 1) {
         Intrin::spinBackoff(iter++);
-        current = Atomic::load(slot, flagcxDeviceMemoryOrderAcquire);
+        current = BarrierSlotOps<P>::load(slot,
+                                          flagcxDeviceMemoryOrderAcquire);
       }
     }
     _epoch += 1;
     if (_coop.threadRank() == 0) {
-      Atomic::store(&_epochBuffer[_ctaIndex], _epoch,
+      BarrierSlotOps<P>::store(&_epochBuffer[_ctaIndex], _epoch,
                     flagcxDeviceMemoryOrderRelease);
     }
     _coop.sync();
