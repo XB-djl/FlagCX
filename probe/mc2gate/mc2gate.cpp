@@ -3,6 +3,13 @@
 //   HcclCommInitAll(2) -> HcclGetCommName -> Mc2CcTilingConfig(name, 6, AlltoAll alg)
 //   -> GetTiling x2 -> HcomGetCommHandleByGroup -> HcclAllocComResourceByTiling -> D2H dump.
 // engine: argv[1] (OpExecuteConfig: 2=AICPU_TS, 3=AIV, 6=CCU_SCHED); devices: argv[2],argv[3].
+// Build (CANN 9.x): tiling-config ctor in static libtiling_api.a is old-ABI, so
+// compile with -D_GLIBCXX_USE_CXX11_ABI=0 and link
+//   libtiling_api.a -l:libopp_registry.so -l:libregister.so -l:libplatform.so
+//   -lmc2_client -lhccl -lhccl_v2 -lhcomm -lascendcl
+//   -l:libunified_dlog.so -l:libc_sec.so
+// Run with ASCEND_GLOBAL_LOG_LEVEL=1 ASCEND_SLOG_PRINT_TO_STDOUT=1 to see the
+// hccl_mc2.cc rejection reason (e.g. invalid deviceType).
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,8 +28,8 @@ extern "C" HcclResult HcclAllocComResourceByTiling(HcclComm comm, void* stream, 
 extern "C" HcclResult HcomGetCommHandleByGroup(const char* group, HcclComm* comm);
 
 struct TD {
-    Mc2InitTiling init;
-    Mc2CcTiling cc;
+    AscendC::tiling::Mc2InitTiling init;
+    AscendC::tiling::Mc2CcTiling cc;
 };
 
 static int32_t g_rc[2] = {-99, -99};
@@ -60,7 +67,6 @@ static void OneRank(int rank, aclrtContext ctx, aclrtStream stream, HcclComm com
     cfg.SetCommEngine(engine);
 
     TD* td = new TD();
-    memset(td, 0, sizeof(*td));
     uint32_t g0 = cfg.GetTiling(td->init);
     uint32_t g1 = cfg.GetTiling(td->cc);
     printf("[rank%d] GetTiling rc=%u,%u engine=%u\n", rank, g0, g1, (unsigned)engine);
