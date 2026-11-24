@@ -30,15 +30,31 @@ export ASCEND_RT_VISIBLE_DEVICES=0,1,4,5,6,7,8,9
 export LD_LIBRARY_PATH=/data/shmem/install/shmem/lib:$LD_LIBRARY_PATH
 export ATOM_IP_PORT=tcp://127.0.0.1:8766
 for c in add_u32 add_u64 add_i32 add_f32 cas_u32 cas_u64 cas_i32 cas_f32 \
-         sig_add intra2_u32; do
-  timeout 180 /usr/local/openmpi/bin/mpirun --allow-run-as-root -np 8 \
+         sig_add intra2_u32 intra2_i32; do
+  timeout 180 "$(command -v mpirun)" --allow-run-as-root -np 8 \
     ./atomprobe $c
 done
 ```
 
 真双机（109+110）变体：`ATOM_IP_PORT=tcp://172.16.10.109:8766`，
 mpirun 用 report §5 的 MPMD 模板（两半都要 `-x ATOM_IP_PORT`、
-`-x ASCEND_HOME_PATH`、`-x LD_LIBRARY_PATH`）。
+`-x ASCEND_HOME_PATH`、`-x LD_LIBRARY_PATH`）。两机 `/data` 不共享：
+110 端要先有同一相对路径下的 `probe/shmem_atomprobe`（含编好的
+`atomprobe`），从 109 容器 `scp -r` 过去即可，110 端不必重编。
+
+## 实测结果（2026-11-24，CANN 9.2.1 / cann-shmem 1.6.0 / 910C）
+
+np=8 单机三连（chips 0,1,4,5,6,7,8,9，`ATOM_ITERS=1000`）＋ np=2 真双机（109+110）：
+
+| 结果 | 用例 | 实测终值 |
+|---|---|---|
+| 成立 | `add_i32` `add_f32` | 2000@np2 / 8000@np8，三连一致；双机 np=2 2000 |
+| 成立 | `intra2_i32` | 2000 = 2 核 × 1000，三连一致 |
+| 成立 | `sig_add` | 2000@np2 / 8000@np8，三连一致 |
+| 不成立 | `add_u32` `add_u64` | 恒 1（iters=5 与 1000 同），不累加 |
+| 不成立 | `cas_{u32,u64,i32,f32}` | 恒 0，含 iters=1 —— compare_swap 是 no-op |
+
+与文档按类型分路的口径一致（uint 走 Scalar AtomicAdd，文档标 950）。
 
 ## 判读
 
