@@ -11,7 +11,8 @@ atomic_add 终值正确**，另验 `aclshmemx_signal_op(ADD)` 并发累加。
 | `add_u32/u64/i32/f32` | 每个 PE 对 PE0 同一字 add 1，各 iters 次 | iters × npes |
 | `cas_u32/u64/i32/f32` | 每个 PE 对 PE0 同一字 CAS 自增（返回旧值驱动循环） | iters × npes |
 | `sig_add` | 每个 PE 对 PE0 同一 int32 字 signal ADD 1，各 iters 次 | iters × npes |
-| `intra2_u32` | 同一 PE 的 2 个 AIV core 对本地字各 add iters 次 | iters × 2 |
+| `intra2_u32` | 同一 PE 的 2 个 AIV core 对本地字各 add iters 次（u32 路径已知不累加，只作对照） | iters × 2 |
+| `intra2_i32` | 同上，int32（累加路径，回答 F1 的双核判据） | iters × 2 |
 
 内核只发操作不轮询，宿主等终值（20 s 超时）——引擎没完成就是判 FAIL，
 不会挂死内核。`got < expect` 可能是丢操作（同一 MTE 通道上 4B put 丢过），

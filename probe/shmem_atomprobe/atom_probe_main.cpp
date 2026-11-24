@@ -64,6 +64,7 @@ static const CaseDef kCases[] = {
     {"cas_f32", KIND_CAS, 3, 1, 0, 4},
     {"sig_add", KIND_SIG, 0, 1, 0, 4},
     {"intra2_u32", KIND_ADD, 0, 2, 1, 4},
+    {"intra2_i32", KIND_ADD, 2, 2, 1, 4},
 };
 enum { NCASES = (int)(sizeof(kCases) / sizeof(kCases[0])) };
 
