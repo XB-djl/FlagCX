@@ -187,7 +187,15 @@ int main(int argc, char **argv) {
       usleep(50000);
     }
   }
-  int ok = mine ? (got == expect) : 1;
+  // Float cases arrive as a bit pattern; compare the value they encode, not
+  // the pattern itself.
+  int reached = (got == expect);
+  if (c.type == 3 && c.kind != KIND_SIG) {
+    float f = 0.0f;
+    memcpy(&f, &got, sizeof(f));
+    reached = (f == (float)expect);
+  }
+  int ok = mine ? reached : 1;
   int okMin = 0;
   MPI_Allreduce(&ok, &okMin, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD);
   const int pass = okMin && haveFn && launchRc == 0 && syncRc == 0 &&
