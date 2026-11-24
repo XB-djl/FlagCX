@@ -1,0 +1,67 @@
+# cann-shmem MTE atomic probe (F1) — Ascend 910C.
+#
+# Host pass: g++ + MPI.  Device pass: bisheng with the flags verified in
+# test/kernel/ascend/Makefile.  Each .asc is a separate experiment: a type
+# the soc rejects fails only its own unit (the compile rule is prefixed
+# with '-'), and the host reports that case as UNSUPPORTED instead of
+# aborting the run.
+#
+# Build: make DEVICE_HOME=<CANN> SHMEM_HOME=<cann-shmem> MPI_HOME=<openmpi>
+
+DEVICE_HOME ?= /usr/local/Ascend/cann-9.2.1
+SHMEM_HOME  ?= /data/shmem/install/shmem
+MPI_HOME    ?= /usr/local/openmpi
+CXX         ?= g++
+
+include ../../makefiles/ascend.mk
+
+BISHENG := $(ASCEND_BISHENG)
+ifeq ($(strip $(BISHENG)),)
+$(error bisheng not found under $(DEVICE_HOME))
+endif
+
+SHMEM_INC := -I$(SHMEM_HOME)/include -I$(SHMEM_HOME)/include/device \
+             -I$(SHMEM_HOME)/src/device -I$(SHMEM_HOME)/src
+ASCENDC_INC := $(addprefix -I,$(firstword \
+                 $(wildcard $(DEVICE_HOME)/aarch64-linux/include/ascendc) \
+                 $(wildcard $(DEVICE_HOME)/include/ascendc) \
+                 $(wildcard $(DEVICE_HOME)/compiler/include/ascendc)))
+ACL_INC   := -I$(DEVICE_HOME)/include
+
+ASC_FLAGS  := -x asc --npu-soc=$(ASCEND_SOC) \
+              --cce-auto-infer-kernel-type=false -std=c++17 -O2 -c -fPIC \
+              -DNDEBUG
+HOST_FLAGS := -std=c++17 -O2 -fPIC -DOMPI_SKIP_MPICXX \
+              -I$(MPI_HOME)/include $(ACL_INC) $(SHMEM_INC)
+
+ASCS := atom_add.asc atom_cas.asc atom_sig.asc
+AOBJS := $(ASCS:.asc=.o)
+
+.PHONY: all clean
+
+all: atomprobe
+
+atom_add.o: atom_add.asc atom_args.h
+	-$(BISHENG) $(ASC_FLAGS) -o $@ $< $(SHMEM_INC) $(ACL_INC) $(ASCENDC_INC)
+
+atom_cas.o: atom_cas.asc atom_args.h
+	-$(BISHENG) $(ASC_FLAGS) -o $@ $< $(SHMEM_INC) $(ACL_INC) $(ASCENDC_INC)
+
+atom_sig.o: atom_sig.asc atom_args.h
+	-$(BISHENG) $(ASC_FLAGS) -o $@ $< $(SHMEM_INC) $(ACL_INC) $(ASCENDC_INC)
+
+atom_probe_main.o: atom_probe_main.cpp
+	$(CXX) $(HOST_FLAGS) -c -o $@ $<
+
+# Missing device units (failed compile) are simply not linked; the weak
+# launcher references in the host resolve to null and the case prints
+# UNSUPPORTED.
+atomprobe: atom_probe_main.o $(AOBJS)
+	$(CXX) -o $@ atom_probe_main.o \
+	  $$(ls atom_add.o atom_cas.o atom_sig.o 2>/dev/null) \
+	  -L$(SHMEM_HOME)/lib -lshmem -Wl,-rpath,$(SHMEM_HOME)/lib \
+	  -L$(MPI_HOME)/lib -lmpi -Wl,-rpath,$(MPI_HOME)/lib \
+	  -L$(DEVICE_LIB) $(DEVICE_LINK)
+
+clean:
+	rm -f atomprobe atom_probe_main.o $(AOBJS)
